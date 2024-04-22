@@ -1,0 +1,94 @@
+#!/usr/bin/perl
+
+# Copyright (C) 2021-2024 Viktor Soderqvist
+# SPDX-License-Identifier: MIT
+
+use warnings;
+use strict;
+
+my $mode = '';
+my $ignore = '';
+my $delete = 0;
+my $verbose = 0;
+my $dry = 0;
+
+while (@ARGV) {
+      $_ = $ARGV[0];
+      if (/^--$/) {
+          shift;
+          last;
+      } elsif (/^(?:-P|--perl-regexp)$/) {
+          $mode = '-P';
+      } elsif (/^(?:-F|--fixed-strings)$/) {
+          $mode = '-F';
+      } elsif (/^(?:-i|--ignore-case)$/) {
+          $ignore = '-i';
+      } elsif (/^(?:-D|--delete)$/) {
+          $delete = 1;
+      } elsif (/^(?:-d|--dry)$/) {
+          $dry = 1;
+      } elsif (/^(?:-v|--verbose)$/) {
+          $verbose = 1;
+      } elsif (/^(?:-h|--help)$/) {
+          help();
+          exit;
+      } elsif (/^-/) {
+          die "Option not allowed: $_\n";
+      } else {
+          # It's a filename
+          last;
+      }
+      shift;
+}
+
+die "One of -P (--perl-regexp) or -F (--fixed-strings) is required.\n" unless $mode;
+
+die "Bad usage. Try --help." unless @ARGV == ($delete ? 1 : 2);
+
+my $pattern     = shift;
+my $replacement = shift;
+
+my $flags = ($ignore eq '-i' ? 'i' : '') . "m";
+
+my @files = `git grep -l $mode $ignore '$pattern'`;
+$pattern = $mode eq '-F'
+    ? qr/(?$flags)\Q$pattern\E/
+    : qr/(?$flags)$pattern/;
+print "Pattern: '$pattern'\n" if $verbose;
+for my $file (@files) {
+    chomp $file;
+    print "Processing $file\n" if $verbose;
+    open(my $in, "<", $file) or die "Can't open $file: $!";
+    open(my $out, ">", "$file~~~") or die "Can't create $file~~~: $!";
+    while (<$in>) {
+        if ($delete) {
+            print $out $_ unless /$pattern/;
+        } else {
+            s/$pattern/$replacement/g;
+            print $out $_;
+        }
+    }
+    close $in;
+    close $out;
+    rename "$file~~~", $file unless $dry;
+}
+
+sub help {
+    print "Usage: $0 [ OPTIONS ] PATTERN [ REPLACEMENT ]\n",
+        "\n",
+        "The script combines 'git grep' with a global replacement within each of the\n",
+        "matching files.\n",
+        "\n",
+        "Options:\n",
+        "\n",
+        "  -P  --perl-regexp    Perl regexp.\n",
+        "  -F  --fixed-strings  Fixed strings.\n",
+        "  -i  --ignore-case    Case insensitive matching.\n",
+        "  -D  --delete         Delete matching lines. No REPLACEMENT.\n",
+        "  -d  --dry            Dry run. Changes written to files with '~~~' suffix.\n",
+        "  -v  --verbose        More printouts.\n",
+        "  -h  --help           Print help and exit.\n",
+        "\n",
+        "Either -P or -F must be given. REPLACEMENT must be given except if -D is\n",
+        "specified.\n";
+}
